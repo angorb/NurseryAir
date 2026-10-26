@@ -1,6 +1,15 @@
 # NurseryAir
 
-Don't wake the baby, but know if they're stinky.
+Do you have a stinky baby? Have a better idea with less risk of waking them up!
+
+### Hardware
+
+- [SparkFun ESP32-WROOM Thing Plus C](https://www.sparkfun.com/sparkfun-thing-plus-esp32-wroom-usb-c.html)
+- [SparkFun BME680 Environmental Sensor Breakout](https://www.sparkfun.com/sparkfun-environmental-sensor-breakout-bme680-qwiic.html)
+
+The pins and i2c address are configurable in `src/main.cpp`, so it may work with other development boards and BME680 breakouts.
+
+STLs for a 3D-printable hardware-free project box is available in `/models`. The models can be customized and regenerated to fit other hardware by editing and running `models/make_enclosure.py` (requires numpy and matplotlib).
 
 ### Files
 
