@@ -2,6 +2,8 @@
 
 Do you have a stinky baby? Have a better idea with less risk of waking them up!
 
+<img width="1156" height="1681" alt="image" src="https://github.com/user-attachments/assets/bee1bca1-e284-4a9f-9bcf-88756b26d646" />
+
 ### Hardware
 
 - [SparkFun ESP32-WROOM Thing Plus C](https://www.sparkfun.com/sparkfun-thing-plus-esp32-wroom-usb-c.html)
