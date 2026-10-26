@@ -14,12 +14,12 @@ import struct, sys, os
 import numpy as np
 
 # ------------------------------ parameters (mm) ------------------------------
-WALL, FLOOR = 2.4, 2.0
+WALL, FLOOR = 2.8, 2.0
 BOARD_T     = 1.6
 STANDOFF    = 3.0            # ledge height under the boards
 
-ESP_L, ESP_W = 58.4, 22.9    # SparkFun Thing Plus C (2.3" x 0.9")
-SEN_L, SEN_W = 25.4, 25.4    # BME680 Qwiic breakout -- VERIFY with calipers
+ESP_L, ESP_W = 59.7, 23.5    # SparkFun Thing Plus C (2.3" x 0.9")
+SEN_L, SEN_W = 26, 26    # BME680 Qwiic breakout -- VERIFY with calipers
 ESP_SLACK_L  = 1.6           # extra length in the ESP32 compartment
 ESP_FIT      = 0.5           # extra width around the ESP32 board
 SEN_SLACK    = 2.6           # extra length in the sensor compartment
@@ -28,14 +28,15 @@ IW      = max(SEN_W + 0.6, 26.0)   # interior width (Y), shared by both compartm
 ZL      = 14.0               # underside of lid above bed (cavity height)
 LID_T   = 2.0
 CL      = 0.25               # sliding clearance of lid in its grooves
-GD      = 1.2                # groove depth into the side walls
-ROOF    = 1.5                # wall material above the groove
+R       = 1.0                # how far the lid's edges reach into the side walls
+ROOF    = 1.5                # solid wall left above the sloped lid slot
+LAYER   = 0.16                # step size used to build 45-degree overhangs
 DIV     = 2.0                # divider thickness
 EAR_L, EAR_T, EAR_W, EAR_HOLE = 10.0, 2.5, 16.0, 4.5
 
 VENT_N, VENT_W, VENT_P = 6, 1.8, 3.6   # vent slots: count, width, pitch
 BUMP_H = 0.35                           # detent bump height on the lid
-POCKET = 0.6                            # detent pocket depth in the groove floor
+POCKET = 0.5                            # detent pocket depth in the groove's outer face
 
 # ------------------------------ derived geometry ------------------------------
 ESP_IL = ESP_L + ESP_SLACK_L
@@ -47,7 +48,12 @@ x_e1   = x_e0 + ESP_IL
 x_s0   = x_e1 + DIV
 x_s1   = x_s0 + SEN_IL
 X      = x_s1 + WALL
-TOP    = ZL + LID_T + CL + ROOF
+LID_V  = LID_T - R                            # vertical part of the lid edge (bottom), then 45 deg chamfer
+GDN    = R + CL                                # slot depth into the side wall
+y_o    = WALL - GDN                            # outer (vertical) face of the slot
+z_i    = ZL + LID_V                            # where the slot's 45 deg ceiling starts
+zg0    = ZL - CL                               # slot floor
+TOP    = z_i + GDN + ROOF
 G      = (IW - (ESP_W + ESP_FIT)) / 2           # wall thickening beside the ESP32 board
 GUIDE_TOP = FLOOR + STANDOFF + BOARD_T + 3.0
 x_f    = WALL + 0.15                            # lid front edge when closed
@@ -139,6 +145,17 @@ def write_stl(path, tris, shift):
     return vol
 
 
+def corbel(solid, x0, x1, yc, half, zbot, zstart, rise, step=LAYER):
+    """Opening through a wall whose top corners are stepped inward at 45 degrees
+    (one small step per layer) so the top closes without a long bridge."""
+    solid.cut(x0, x1, yc - half, yc + half, zbot, zstart)
+    n = max(1, round(rise / step))
+    s = rise / n
+    for j in range(n):
+        h = half - j * s
+        solid.cut(x0, x1, yc - h, yc + h, zstart + j * s, zstart + (j + 1) * s)
+
+
 # ------------------------------ base ------------------------------
 base = Solid()
 base.add(0, X, 0, Y, 0, TOP)                                   # outer block
@@ -146,7 +163,7 @@ base.cut(WALL, X - WALL, WALL, Y - WALL, FLOOR, TOP + 1)       # cavity
 
 # divider with cable slot
 base.add(x_e1, x_s0, WALL, Y - WALL, FLOOR, ZL - 0.3)
-base.cut(x_e1, x_s0, YC - 5, YC + 5, FLOOR, 9.0)
+corbel(base, x_e1, x_s0, YC, 6.0, FLOOR, 6.0, 3.0)
 
 # ESP32 side: thicken walls to locate the board, plus ledges under its long edges
 for y0, y1, l0, l1 in ((WALL, WALL + G, WALL + G, WALL + G + 1.5),
@@ -158,13 +175,30 @@ for y0, y1, l0, l1 in ((WALL, WALL + G, WALL + G, WALL + G + 1.5),
 base.add(x_s0, x_s1, WALL, WALL + 1.5, FLOOR, FLOOR + STANDOFF)
 base.add(x_s0, x_s1, Y - WALL - 1.5, Y - WALL, FLOOR, FLOOR + STANDOFF)
 
-# lid grooves (open at the sensor end), end-wall cut-out, detent pockets
-zg0, zg1 = ZL - CL, ZL + LID_T + CL
-base.cut(WALL, X + 1, WALL - GD, WALL, zg0, zg1)
-base.cut(WALL, X + 1, Y - WALL, Y - WALL + GD, zg0, zg1)
-base.cut(X - WALL, X + 1, WALL, Y - WALL, zg0, TOP + 1)
-for ya, yb in ((WALL - 1.0, WALL), (Y - WALL, Y - WALL + 1.0)):
-    base.cut(xb - 2.8, xb + 2.8, ya, yb, zg0 - POCKET, zg0)
+# Lid slot (open at the sensor end).  Its cross-section is a dovetail-like trapezoid: a
+# vertical outer face, a flat floor, and a ceiling that rises at 45 degrees toward the
+# cavity.  Printed upright, every layer of the wall above the slot grows inward by one
+# small step from the layer below it, always attached to the outer skin, so nothing hangs
+# in the air.  The lid has the matching trapezoid: widest at its inner face.
+n_g = max(1, round(GDN / LAYER))
+s_g = GDN / n_g
+for j in range(n_g):
+    top = z_i + (j + 1) * s_g
+    base.cut(WALL, X + 1, y_o + j * s_g, y_o + (j + 1) * s_g, zg0, top)
+    base.cut(WALL, X + 1, Y - y_o - (j + 1) * s_g, Y - y_o - j * s_g, zg0, top)
+base.cut(X - WALL, X + 1, WALL, Y - WALL, zg0, TOP + 1)   # open end wall above the lid
+
+# Detent pockets in the slot's outer face (their tops are chamfered the same way).
+n_p = max(1, round(POCKET / LAYER))
+s_p = POCKET / n_p
+z_p = z_i - POCKET
+for side in (+1, -1):
+    face = y_o if side > 0 else Y - y_o
+    def yr(depth):
+        return (face - depth, face) if side > 0 else (face, face + depth)
+    base.cut(xb - 2.8, xb + 2.8, *yr(POCKET), zg0, z_p)
+    for k in range(n_p):
+        base.cut(xb - 2.8, xb + 2.8, *yr(POCKET - k * s_p), z_p + k * s_p, z_p + (k + 1) * s_p)
 
 # side vents beside the sensor
 for i in range(VENT_N):
@@ -173,22 +207,31 @@ for i in range(VENT_N):
     base.cut(x0, x0 + VENT_W, Y - WALL - 0.01, Y + 1, FLOOR + STANDOFF + 0.2, zg0 - 0.6)
 
 # USB-C opening at the ESP32 end
-base.cut(-1, WALL, YC - 7, YC + 7, FLOOR + STANDOFF - 0.2, 12.5)
+corbel(base, -1, WALL, YC, 8.0, FLOOR + STANDOFF - 0.2, 9.5, 4.5)
 
 # mounting ears with screw holes
 for xa, xb_, hc in ((-EAR_L, 0, -EAR_L / 2), (X, X + EAR_L, X + EAR_L / 2)):
     base.add(xa, xb_, YC - EAR_W / 2, YC + EAR_W / 2, 0, EAR_T)
     base.cut(hc - EAR_HOLE / 2, hc + EAR_HOLE / 2, YC - EAR_HOLE / 2, YC + EAR_HOLE / 2, -1, EAR_T + 1)
 
-# ------------------------------ lid (printed face-down) ------------------------------
+# ------------------------------ lid (printed inner-face-down) ------------------------------
+# Local z = 0 is the lid's inner face (the one facing the electronics), which sits on the
+# print bed.  The cross-section is a trapezoid, widest at the bed, so each layer steps
+# inward from the one below: no overhangs.
 lid = Solid()
-yl0, yl1 = WALL - (GD - CL), Y - WALL + (GD - CL)
-lid.add(x_f, X, yl0, yl1, 0, LID_T)
+yl0, yl1 = WALL - R, Y - WALL + R
+lid.add(x_f, X, yl0, yl1, 0, LID_V)                      # vertical lower edge
+n_c = max(1, round(R / LAYER))
+s_c = R / n_c
+for k in range(n_c):                                     # 45 degree chamfer, one step per layer
+    inset = (k + 1) * s_c
+    lid.add(x_f, X, yl0 + inset, yl1 - inset, LID_V + k * s_c, LID_V + (k + 1) * s_c)
 for i in range(VENT_N):
     x0 = vx0 + i * VENT_P
     lid.cut(x0, x0 + VENT_W, YC - 7, YC + 7, -1, LID_T + 1)
-for ya, yb in ((1.5, 2.3), (Y - 2.3, Y - 1.5)):
-    lid.add(xb - 2.0, xb + 2.0, ya, yb, LID_T, LID_T + BUMP_H)
+# detent bumps on the vertical part of each edge (supported all the way down to the bed)
+lid.add(xb - 2.0, xb + 2.0, yl0 - BUMP_H, yl0, 0, LID_V)
+lid.add(xb - 2.0, xb + 2.0, yl1, yl1 + BUMP_H, 0, LID_V)
 
 # ------------------------------ output ------------------------------
 out = os.path.dirname(os.path.abspath(__file__))
