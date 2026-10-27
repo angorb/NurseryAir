@@ -17,7 +17,7 @@ STLs for a 3D-printable hardware-free project box is available in `/models`. The
 
 - `main.cpp` has the web server, saved settings, and history.
 - `web_ui.h` holds the single-page UI, embedded in the firmware.
-- `secrets.h` gained WEB_USER and WEB_PASS, so set those before flashing.
+- `secrets.h` set HTTP Basic Auth and WiFi credentials here before flashing.
 
 ### What you get
 
